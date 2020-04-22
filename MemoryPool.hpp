@@ -1,5 +1,9 @@
 #pragma once
+#include <cstddef>
+#include <cassert>
 #include <memory>
+#include <algorithm>
+#include <iostream>
 
 #define NewAndDeleteOperators(Class)\
 inline void* operator new(size_t size)\
@@ -7,48 +11,67 @@ inline void* operator new(size_t size)\
 inline void operator delete(void* ptr)\
 { g_memory->Free(ptr); }
 
+
+typedef unsigned char byte;
+typedef unsigned long long uint64;
+
+struct MemBlock             // size 40 bytes 
+{
+    uint64      size;       // size of the free memory slot (bytes)
+    uint64      usedSize;       // size of the used memory in the slot (bytes)
+    MemBlock    *next;      // points to a FreeSlot Structure
+    byte        *data;      // pointer to the Data
+    bool        isAlloc;    // true, when this MemoryChunks points to a "Data"-Block
+                            // which can be deallocated via "free()"
+};
+
 class MemorySystem
 {
-    struct MemSlot
-    {
-        /* size of the free slot in bytes */
-        size_t  size;
-        /* points to a FreeSlot Structure */
-        void    *next;
-        /* &data   points to it self */
-        void    *data;
-    };
-    const size_t    min_alloc_size;
-    size_t          pool_size_bytes;
-    MemSlot         *last_slot;     // List of freed elements.
-    void            *memory_pool;   // Whole chunk of memory requested at startup
+    MemBlock        *firstBlock;
+    MemBlock        *lastBlock;
+    MemBlock        *cursor;
+
+    const uint64    blockSize;
+    const uint64    minBlockSize;
+
+    uint64          totalPoolSize;
+    uint64          usedPoolSize;
+    uint64          freePoolSize;
+    
+    uint64          blockCount;
+    uint64          allocCount;
+
     bool            should_expand;
     bool            defrag_enabled;
 
 public:
     /* Pool size in MemorySystem::MEM_UNIT*/
-    MemorySystem(const size_t in_minAllocSize, const size_t in_maxMinSizeAllocs, const bool in_shouldExpand = false, const bool in_defragEnabled = false)
-    :   min_alloc_size((in_minAllocSize >= 8) ? in_minAllocSize : 8),   // minimo es 8 dado que el puntero tiene 8 bytes y debe ser tomado en cuenta
-        pool_size_bytes((min_alloc_size + sizeof(size_t) * 2)* in_maxMinSizeAllocs),
-        should_expand(in_shouldExpand), defrag_enabled(in_defragEnabled), memory_pool(nullptr), last_slot(nullptr)
-    {
-        memory_pool = malloc(pool_size_bytes);
-        if (memory_pool)
-        {
-#ifdef _DEBUG
-            memset(memory_pool, 0, pool_size_bytes);
-#endif
-            /* set whole memory as the available slot */
-            last_slot = (MemSlot*) memory_pool;
-            last_slot->size = pool_size_bytes;
-            last_slot->next = nullptr;
-            last_slot->data = nullptr;
-        }
-    }
-    
-    void*   Alloc(size_t in_size);
+    MemorySystem(const uint64 in_initialPoolSize, const uint64 in_blockSize, const uint64 in_minAllocSize,
+        const bool in_shouldExpand = false, const bool in_defragEnabled = false);
+    ~MemorySystem();
 
-    void    Free(void* pointer);
+    void*   Alloc(uint64 in_size) { return GetMemory(in_size); }
+
+    void    Free(void* pointer) { FreeMemory(pointer); }
+
+private:
+    //return a block which can hold the requested amount of memory, or NULL, if none was found.
+    MemBlock*   FindChunkSuitableToHoldMemory(const uint64 sMemorySize);
+    MemBlock*   FindChunkHoldingPointerTo(void* ptrMemoryBlock);
+    MemBlock*   SkipChunks(MemBlock* ptrStartChunk, const uint64 uiChunksToSkip);
+    MemBlock*   SetChunkDefaults(MemBlock* ptrChunk);
+
+    uint64 CalculateNeededChunks(const uint64 sMemorySize);
+    uint64 CalculateBestMemoryBlockSize(const uint64 allocSize);
+
+    bool AllocateMemory(const uint64 sMemorySize);
+    bool LinkChunksToData(MemBlock* ptrNewChunks, const uint64 uiChunkCount, byte* ptrNewMemBlock);
+    bool RecalcChunkMemorySize(MemBlock* ptrChunk, const uint64 uiChunkCount);
+
+    void* GetMemory(const uint64 sMemorySize);
+    void FreeMemory(void* ptrMemoryBlock);
+    void FreeChunks(MemBlock* ptrChunk);
+    inline void SetMemoryChunkValues(MemBlock* ptrChunk, const uint64 sMemBlockSize);
 };
 
 
